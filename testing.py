@@ -26,7 +26,7 @@ def spread_delta(F, pf):
     return delta
 
 # define problem
-problem = get_problem("dtlz4")
+problem = get_problem("dtlz7")
 
 algorithm = NSGA2(pop_size=100)
 
@@ -43,7 +43,7 @@ print(f"Spread (Δ): {spread:.4f}")
 
 # plotting
 plot = Scatter()
-plot.add(pf, plot_type="line", color="black", alpha=0.7)
+plot.add(pf, plot_type="scatter", color="black", alpha=0.7)
 plot.add(res.F, facecolor="none", edgecolor="red")
 plot.show()
 

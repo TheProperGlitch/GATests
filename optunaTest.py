@@ -10,7 +10,7 @@ from pymoo.optimize import minimize
 from pymoo.problems.single import Sphere
 
 
-algorithm = NSGA3()
+algorithm = NSGA3(ref_dirs=ref_dirs)
 
 problem = Sphere(n_var=10)
 n_evals = 500

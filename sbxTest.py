@@ -1,110 +1,100 @@
-import time
 import numpy as np
 import matplotlib.pyplot as plt
-import mplcursors
+from scipy.spatial.distance import pdist, cdist
+from pymoo.problems import get_problem
 from pymoo.algorithms.moo.nsga2 import NSGA2
-from pymoo.problems.many import DTLZ4
-from pymoo.util.ref_dirs import get_reference_directions
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.optimize import minimize
 from pymoo.indicators.hv import HV
-import matplotlib.cm as cm
 
 # ==============================
-# Helper: Spread (Δ) metric
+# Helpers
 # ==============================
-def spread_delta(F, pf):
-    F = F[np.argsort(F[:, 0])]
-    d = np.linalg.norm(np.diff(F, axis=0), axis=1)
-    d_mean = np.mean(d)
-    df = np.linalg.norm(F[0] - pf[0])
-    dl = np.linalg.norm(F[-1] - pf[-1])
-    return (df + dl + np.sum(np.abs(d - d_mean))) / (df + dl + (len(d) - 1) * d_mean)
+def total_spread(F):
+    """Average pairwise distance between solutions (diversity)."""
+    return np.mean(pdist(F))
+
+def distance_to_global_minimum(F):
+    """Average distance to the ideal (0,0,...,0) point."""
+    global_min = np.zeros(F.shape[1])
+    return np.mean(np.linalg.norm(F - global_min, axis=1))
+
+def inverted_generational_distance(F, PF):
+    """Compute IGD (average distance from PF points to closest F point)."""
+    D = cdist(PF, F)
+    return np.mean(np.min(D, axis=1))
 
 # ==============================
 # Configuration
 # ==============================
-problem = DTLZ4(n_var=7, n_obj=3)
-ref_dirs = get_reference_directions("das-dennis", 3, n_partitions=12)
-pf = problem.pareto_front(ref_dirs)
+problem = get_problem("dtlz7")
+pf = problem.pareto_front()
 ref_point = np.max(pf, axis=0) * 1.1
-
-n_trials = 100
-n_generations = 200
-fixed_pop_size = 100
-
-# Define crossover probabilities to test
-crossover_probs = np.linspace(0.5, 1.0, n_trials)  # from 0.5 to 1.0
-
-plt.figure(figsize=(14, 6))
-ax1 = plt.subplot(1, 2, 1)
-ax2 = plt.subplot(1, 2, 2)
-
-cmap = cm.plasma
-scatter_hv = []
-scatter_spread = []
-crossover_labels = []
 
 hv_metric = HV(ref_point=ref_point)
 
-# ==============================
-# Run trials with varying crossover probability
-# ==============================
-for i, cx_prob in enumerate(crossover_probs): 
-    print(i)
-    crossover = SBX(prob=cx_prob, eta=15)  # eta fixed, vary probability
-    algorithm = NSGA2(pop_size=fixed_pop_size, crossover=crossover)
+n_generations = 200
+pop_size = 10
+sbx_probs = np.linspace(0.1, 1.0, 100)
 
-    start_time = time.time()
-    res = minimize(
-        problem,
-        algorithm,
-        ('n_gen', n_generations),
-        seed=i,
-        verbose=False
+hv_values = []
+spread_values = []
+distance_values = []
+igd_values = []
+
+
+for p in sbx_probs:
+    print(f"Running with SBX prob = {p:.2f}")
+    
+    algorithm = NSGA2(
+        pop_size=pop_size,
+        crossover=SBX(prob=p, eta=15)
     )
-    elapsed_time = time.time() - start_time
 
-    hv_value = hv_metric(res.F)
-    spread_value = spread_delta(res.F, pf)
+    res = minimize(problem,
+                   algorithm,
+                   ('n_gen', n_generations),
+                   seed=2,
+                   verbose=False)
 
-    color = cmap(i / n_trials)
-    p1 = ax1.scatter(elapsed_time, hv_value, color=color, s=50)
-    p2 = ax2.scatter(elapsed_time, spread_value, color=color, s=50)
-
-    scatter_hv.append(p1)
-    scatter_spread.append(p2)
-    crossover_labels.append(cx_prob)
-
-# ==============================
-# Configure Plots
-# ==============================
-ax1.set_title("Accuracy (Hypervolume) vs Time (Varying Crossover Prob.)")
-ax1.set_xlabel("Time (s)")
-ax1.set_ylabel("Hypervolume")
-ax1.grid(True)
-
-ax2.set_title("Diversity (Spread Δ) vs Time (Varying Crossover Prob.)")
-ax2.set_xlabel("Time (s)")
-ax2.set_ylabel("Spread Δ (Lower is Better)")
-ax2.grid(True)
+    F = res.F
+    hv_values.append(hv_metric(F))
+    spread_values.append(total_spread(F))
+    distance_values.append(distance_to_global_minimum(F))
+    igd_values.append(inverted_generational_distance(F, pf))
 
 # ==============================
-# Interactive tooltips showing crossover probability
+# Plot Results
 # ==============================
-cursor1 = mplcursors.cursor(scatter_hv, hover=True)
-cursor2 = mplcursors.cursor(scatter_spread, hover=True)
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
-@cursor1.connect("add")
-def on_add_hv(sel):
-    idx = scatter_hv.index(sel.artist)
-    sel.annotation.set_text(f"Crossover Prob: {crossover_labels[idx]:.2f}")
+# HV vs SBX
+axes[0, 0].plot(sbx_probs, hv_values, marker='o', color='blue')
+axes[0, 0].set_xlabel("SBX Crossover Probability")
+axes[0, 0].set_ylabel("Hypervolume")
+axes[0, 0].set_title("Hypervolume vs SBX Probability")
+axes[0, 0].grid(True)
 
-@cursor2.connect("add")
-def on_add_spread(sel):
-    idx = scatter_spread.index(sel.artist)
-    sel.annotation.set_text(f"Crossover Prob: {crossover_labels[idx]:.2f}")
+# Spread vs SBX
+axes[0, 1].plot(sbx_probs, spread_values, marker='o', color='green')
+axes[0, 1].set_xlabel("SBX Crossover Probability")
+axes[0, 1].set_ylabel("Total Spread")
+axes[0, 1].set_title("Spread vs SBX Probability")
+axes[0, 1].grid(True)
+
+# Distance to Global Min vs SBX
+axes[1, 0].plot(sbx_probs, distance_values, marker='o', color='red')
+axes[1, 0].set_xlabel("SBX Crossover Probability")
+axes[1, 0].set_ylabel("Distance to Global Minimum")
+axes[1, 0].set_title("Convergence (Ideal Distance) vs SBX")
+axes[1, 0].grid(True)
+
+# IGD vs SBX
+axes[1, 1].plot(sbx_probs, igd_values, marker='o', color='purple')
+axes[1, 1].set_xlabel("SBX Crossover Probability")
+axes[1, 1].set_ylabel("IGD")
+axes[1, 1].set_title("IGD vs SBX Probability")
+axes[1, 1].grid(True)
 
 plt.tight_layout()
 plt.show()
-print("done")
